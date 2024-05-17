@@ -1,0 +1,153 @@
+---
+title: "stat473_project"
+author: "Julja Eco"
+date: "2023-05-04"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+df = read_csv("C:/Users/ecoju/OneDrive/Desktop/SCHOOL/STAT 473/Datasets/credit_risk_dataset.csv") 
+
+# Clean data
+df = df |>
+  mutate(statusC=ifelse(status==1, "Yes", "No")) |>
+  select(-status) |>
+  drop_na()
+
+df$intent=as.factor(df$intent)
+df$home_ownership=as.factor(df$home_ownership)
+df$grade=as.factor(df$grade)
+df$default_on_file=as.factor(df$default_on_file)
+df$statusC=as.factor(df$statusC)
+
+n = nrow(df) 
+prop = 0.5 
+set.seed(123) 
+train_id = sample(1:n, size = round(n*prop), replace = FALSE) 
+test_id = (1:n)[-which(1:n %in% train_id)] 
+train_set = df[train_id, ] 
+test_set = df[test_id, ]
+
+```
+
+## Ridge Regression Model
+```{r}
+library(glmnet)
+xmat = model.matrix(statusC~., df)[,-1]
+y = df$statusC
+
+for(i in 1:ncol(xmat)){
+xmat[,i] = scale(xmat[,i], center=FALSE)
+}
+
+mod.ridge=glmnet(xmat,y,alpha=0, family="binomial")
+
+plot(mod.ridge,xvar="lambda", label=TRUE)
+
+coefs.ridge = coef(mod.ridge)
+
+set.seed(1)
+cv.out = cv.glmnet(xmat, y, alpha=0, nfolds=5, family="binomial")
+best.lambda = cv.out$lambda.min
+best.lambda
+
+test.std = model.matrix(statusC~., test_set)[,-1]
+
+for(i in 1:ncol(test.std)){
+test.std[,i] = scale(test.std[,i], center=FALSE)
+}
+
+best.ridge = glmnet(xmat, y, alpha=0, lambda = best.lambda, family="binomial")
+```
+
+
+```{r}
+ridge.pred = predict(best.ridge, newx = test.std, type = "response")
+ridge.pred = ifelse(ridge.pred > 0.5, "Yes", "No")
+cm.ridge = table(pred=ridge.pred, true= test_set$statusC)
+cm.ridge
+
+(cm.ridge[1, 1] + cm.ridge[2, 2])/sum(cm.ridge)
+
+library(ROCR)
+
+ridge.prob=predict(best.ridge, newx=test.std, type="response")
+ridge.pred=prediction(ridge.prob, test_set$statusC)
+ridge.perf=performance(ridge.pred, "tpr", "fpr")
+plot(ridge.perf, main="ROC Curve")
+abline(0,1,lty=3)
+
+ridge.auc=as.numeric(performance(ridge.pred, "auc")@y.values)
+ridge.auc
+
+TPR=cm.ridge[1,1]/(cm.ridge[1,1]+cm.ridge[2,1])
+TPR
+FPR=cm.ridge[1,2]/(cm.ridge[1,2]+cm.ridge[2,2])
+FPR
+
+```
+
+## Classification Tree
+```{r}
+library(tree)
+
+mod.tree=tree(statusC~., data=train_set)
+
+set.seed(1)
+cv.out = cv.tree(mod.tree)
+cv.out$size[which.min(cv.out$dev)]
+
+plot(mod.tree)
+text(mod.tree, pretty=0,cex=0.5)
+
+tree.pred = predict(mod.tree, test_set, type = "class")
+cm.tree = table(pred = tree.pred, true = test_set$statusC)
+cm.tree
+
+(cm.tree[1, 1] + cm.tree[2, 2])/sum(cm.tree)
+
+tree.pred=prediction(as.numeric(tree.pred), as.numeric(test_set$statusC))
+tree.perf=performance(tree.pred, "tpr", "fpr")
+plot(tree.perf, main="ROC Curve")
+abline(0,1,lty=3)
+
+tree.auc=as.numeric(performance(tree.pred, "auc")@y.values)
+tree.auc
+
+TPR=cm.tree[1,1]/(cm.tree[1,1]+cm.tree[2,1])
+TPR
+FPR=cm.tree[1,2]/(cm.tree[1,2]+cm.tree[2,2])
+FPR
+```
+
+```{r}
+library(randomForest)
+p = ncol(df) - 1
+set.seed(123)
+bag_fit = randomForest(statusC~ ., data = train_set, mtry = p, importance = TRUE)
+
+bag.pred = predict(bag_fit, test_set, type = "class")
+tb_bag = table(pred = yhat.test_bag,true = test_set$statusC)
+tb_bag
+
+(tb_bag[1, 1] + tb_bag[2, 2])/sum(tb_bag)
+
+bag.pred = prediction(as.numeric(bag.pred), as.numeric(test_set$statusC))
+bag.perf=performance(bag.pred, "tpr", "fpr")
+plot(bag.perf, main="ROC Curve")
+abline(0,1,lty=3)
+
+bag.auc=as.numeric(performance(bag.pred, "auc")@y.values)
+bag.auc
+```
+
+
+
